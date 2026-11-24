@@ -132,6 +132,7 @@ if toggle_mgmp:
       [
           "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel ke Pengurus",
           "Gunakan Status Penanggung Jawab (Is_MGMP)",
+          "Pilih Manual Guru MGMP",
           "Otomatis 1 Guru per Mapel MGMP",
       ],
       key="mgmp_mode_radio",
@@ -236,6 +237,25 @@ with tab_beban:
       num_rows="dynamic",
       use_container_width=True,
       key="ed_beban",
+  )
+
+if toggle_mgmp and mgmp_mode == "Pilih Manual Guru MGMP":
+  all_teachers_list = (
+      sorted(
+          list(
+              set(
+                  df_status_edited["Guru"]
+                  .dropna()
+                  .astype(str)
+                  .str.strip()
+              )
+          )
+      )
+      if "Guru" in df_status_edited.columns
+      else []
+  )
+  manual_mgmp_teachers = st.sidebar.multiselect(
+      "Pilih Nama-Nama Guru MGMP:", options=all_teachers_list, default=[]
   )
 
 st.divider()
@@ -443,51 +463,6 @@ if st.button(
                 "Hari_MGMP": h_mgmp,
                 "Guru_Yang_Datang_MGMP": min_g,
                 "Kategori": "Pengurus (Penugasan Mapel Tambahan)",
-            })
-      elif mgmp_mode == "Gunakan Status Penanggung Jawab (Is_MGMP)":
-        for g in GURU:
-          st_info = status_dict.get(g, {})
-          val = to_str(st_info.get("Is_MGMP")).upper()
-          if val in ["1", "1.0", "TRUE", "Y", "YES"]:
-            mgmp_teachers.add(g)
-            mapel_raw = to_str(st_info.get("Mata_Pelajaran"))
-            mapel_list = [
-                m.strip().upper() for m in mapel_raw.split(",") if m.strip()
-            ]
-            for m_upper in mapel_list:
-              h_mgmp = HARI_MGMP_MAPEL.get(m_upper)
-              if h_mgmp:
-                mgmp_teacher_mapel_restrictions.append((g, m_upper, h_mgmp))
-                mgmp_info_list.append({
-                    "Mata_Pelajaran": m_upper,
-                    "Hari_MGMP": h_mgmp,
-                    "Guru_Yang_Datang_MGMP": g,
-                    "Kategori": "Penanggung Jawab (Is_MGMP)",
-                })
-      elif mgmp_mode == "Otomatis 1 Guru per Mapel MGMP":
-        for m_name, h_mgmp in HARI_MGMP_MAPEL.items():
-          m_upper = m_name.upper()
-          found_g = None
-          for g in GURU:
-            st_info = status_dict.get(g, {})
-            g_mapels = [
-                x.strip().upper()
-                for x in to_str(st_info.get("Mata_Pelajaran"))
-                .upper()
-                .split(",")
-                if x.strip()
-            ]
-            if m_upper in g_mapels:
-              found_g = g
-              break
-          if found_g:
-            mgmp_teachers.add(found_g)
-            mgmp_teacher_mapel_restrictions.append((found_g, m_upper, h_mgmp))
-            mgmp_info_list.append({
-                "Mata_Pelajaran": m_upper,
-                "Hari_MGMP": h_mgmp,
-                "Guru_Yang_Datang_MGMP": found_g,
-                "Kategori": "Otomatis 1 Guru",
             })
 
     st.session_state["mgmp_selected_info"] = mgmp_info_list
@@ -794,29 +769,8 @@ if st.button(
         ])
     )
 
-    # Execution with fallback solver
-    solver_success = False
-    try:
-      solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.0)
-      model.solve(solver)
-      solver_success = True
-    except Exception:
-      pass
-
-    if not solver_success:
-      try:
-        solver = pulp.PULP_CBC_CMD(msg=False)
-        model.solve(solver)
-        solver_success = True
-      except Exception:
-        pass
-
-    if not solver_success:
-      try:
-        model.solve()
-        solver_success = True
-      except Exception as e_solv:
-        st.error(f"❌ Solver error: {e_solv}")
+    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.0)
+    model.solve(solver)
 
     records = []
     for (g, k, h, j), var in x.items():
@@ -998,6 +952,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
       "📋 Master Data & Export Excel",
   ])
 
+
   # Helper function for drawing visual schedule grid
   def draw_schedule_grid(title, df_grid):
     fig, ax = plt.subplots(figsize=(10, max(4, len(df_grid) * 0.7)))
@@ -1039,7 +994,10 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     plt.tight_layout()
     return fig
 
+
+  # ------------------------------------------------------------------
   # TAB 1: JADWAL SETIAP KELAS (Matriks Keseluruhan)
+  # ------------------------------------------------------------------
   with res_tab1:
     st.subheader("📅 Matriks Jadwal KBM Setiap Kelas (Seluruh Rombel)")
     st.dataframe(pivot_kelas, use_container_width=True)
@@ -1058,7 +1016,9 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
         key="dl_tab1",
     )
 
+  # ------------------------------------------------------------------
   # TAB 2: JADWAL PER KELAS (Dropdown Pilihan Kelas)
+  # ------------------------------------------------------------------
   with res_tab2:
     st.subheader("🏫 Tabel Jadwal Spesifik per Kelas")
     sel_k_tab2 = st.selectbox(
@@ -1092,7 +1052,9 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
         key="dl_tab2",
     )
 
+  # ------------------------------------------------------------------
   # TAB 3: JADWAL PER GURU (Dropdown Pilihan Guru)
+  # ------------------------------------------------------------------
   with res_tab3:
     st.subheader("👨‍🏫 Matriks & Tabel Jadwal per Guru")
     sel_g_tab3 = st.selectbox(
@@ -1127,7 +1089,9 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
         key="dl_tab3",
     )
 
+  # ------------------------------------------------------------------
   # TAB 4: VISUALISASI JADWAL PER KELAS (Gambar PNG & Excel)
+  # ------------------------------------------------------------------
   with res_tab4:
     st.subheader("🖼️ Visualisasi Grafik Gambar Jadwal per Kelas")
     sel_k_img = st.selectbox(
@@ -1180,7 +1144,9 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
           key="dl_tab4_xl",
       )
 
+  # ------------------------------------------------------------------
   # TAB 5: VISUALISASI JADWAL PER GURU (Gambar PNG & Excel)
+  # ------------------------------------------------------------------
   with res_tab5:
     st.subheader("🖼️ Visualisasi Grafik Gambar Jadwal per Guru")
     sel_g_img = st.selectbox(
@@ -1233,7 +1199,9 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
           key="dl_tab5_xl",
       )
 
+  # ------------------------------------------------------------------
   # TAB 6: VISUALISASI GRAFIK KETERISIAN
+  # ------------------------------------------------------------------
   with res_tab6:
     st.subheader("📊 Visualisasi Grafik Keterisian Jam")
 
@@ -1365,7 +1333,9 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
         key="dl_tab6",
     )
 
+  # ------------------------------------------------------------------
   # TAB 7: MASTER DATA & EXPORT EXCEL PAKET LENGKAP
+  # ------------------------------------------------------------------
   with res_tab7:
     st.subheader("📋 Master Data Penugasan & Download Paket Excel Lengkap")
     st.dataframe(df_master, use_container_width=True)
