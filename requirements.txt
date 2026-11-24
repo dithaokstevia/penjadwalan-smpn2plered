@@ -1,0 +1,6 @@
+streamlit
+pandas
+openpyxl
+pulp==2.8.0
+matplotlib
+seaborn
