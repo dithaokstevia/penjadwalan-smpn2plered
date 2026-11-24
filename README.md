@@ -1,1 +1,0 @@
-# penjadwalan-smpn2plered
