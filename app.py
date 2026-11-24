@@ -65,7 +65,7 @@ def find_col(df, candidate_names, default_name=""):
       if name.lower() in c.lower() or c.lower() in name.lower():
         return df.columns[idx]
   if len(df.columns) > 0:
-    return df.columns[0]
+    return df.columns
   return str(default_name)
 
 
@@ -249,7 +249,7 @@ if st.button(
     type="primary",
     use_container_width=True,
 ):
-  with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
+  with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)...\"):
     INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
 
     df_beban_raw = flatten_columns(df_beban_raw)
@@ -406,7 +406,6 @@ if st.button(
           mgmp_mode
           == "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel ke Pengurus"
       ):
-        # 1. Cari semua guru pengurus (Is_MGMP_P == 1)
         mgmp_p_teachers = []
         for g in GURU:
           st_info = status_dict.get(g, {})
@@ -420,7 +419,6 @@ if st.button(
           ]:
             mgmp_p_teachers.append(g)
 
-        # Fallback jika belum ada yang diisi Is_MGMP_P, ambil dari Is_MGMP
         if not mgmp_p_teachers:
           for g in GURU:
             st_info = status_dict.get(g, {})
@@ -438,7 +436,6 @@ if st.button(
           teacher_load = {g: 0 for g in mgmp_p_teachers}
           unassigned_mapels = []
 
-          # Langkah A: Pasangkan Mapel dengan Pengurus Is_MGMP_P yang mengampu mapel tersebut
           for m_name, h_mgmp in HARI_MGMP_MAPEL.items():
             m_upper = m_name.upper()
             assigned_g = None
@@ -470,7 +467,6 @@ if st.button(
             else:
               unassigned_mapels.append((m_upper, h_mgmp))
 
-          # Langkah B: Bagi sisa mapel HANYA di antara para guru pengurus (Is_MGMP_P) tersebut!
           for m_upper, h_mgmp in unassigned_mapels:
             min_g = min(mgmp_p_teachers, key=lambda g: teacher_load[g])
             teacher_load[min_g] += 1
@@ -481,68 +477,6 @@ if st.button(
                 "Hari_MGMP": h_mgmp,
                 "Guru_Yang_Datang_MGMP": min_g,
                 "Kategori": "Pengurus (Penugasan Mapel Tambahan)",
-            })
-
-      elif mgmp_mode == "Gunakan Status Penanggung Jawab (Is_MGMP)":
-        for g in GURU:
-          st_info = status_dict.get(g, {})
-          val = st_info.get("Is_MGMP")
-          if pd.notna(val) and str(val).strip().upper() in [
-              "1",
-              "1.0",
-              "TRUE",
-              "Y",
-              "YES",
-          ]:
-            mgmp_teachers.add(g)
-            m_name = str(st_info.get("Mata_Pelajaran", "-")).upper()
-            for m in m_name.split(","):
-              m_clean = m.strip()
-              if m_clean in HARI_MGMP_MAPEL:
-                h_m = HARI_MGMP_MAPEL[m_clean]
-                mgmp_teacher_mapel_restrictions.append((g, m_clean, h_m))
-                mgmp_info_list.append({
-                    "Mata_Pelajaran": m_clean,
-                    "Hari_MGMP": h_m,
-                    "Guru_Yang_Datang_MGMP": g,
-                    "Kategori": "Penanggung Jawab (Is_MGMP)",
-                })
-
-      elif mgmp_mode == "Pilih Manual Guru MGMP":
-        for g in manual_mgmp_teachers:
-          if g in GURU:
-            mgmp_teachers.add(g)
-            st_info = str(status_dict.get(g, {}).get("Mata_Pelajaran", "-"))
-            for m in st_info.upper().split(","):
-              m_clean = m.strip()
-              if m_clean in HARI_MGMP_MAPEL:
-                h_m = HARI_MGMP_MAPEL[m_clean]
-                mgmp_teacher_mapel_restrictions.append((g, m_clean, h_m))
-                mgmp_info_list.append({
-                    "Mata_Pelajaran": m_clean,
-                    "Hari_MGMP": h_m,
-                    "Guru_Yang_Datang_MGMP": g,
-                    "Kategori": "Pilihan Manual",
-                })
-
-      elif mgmp_mode == "Otomatis 1 Guru per Mapel MGMP":
-        for m_name, h_mgmp in HARI_MGMP_MAPEL.items():
-          m_upper = m_name.upper()
-          selected_for_m = None
-          for (g, k), m_idx in pair_mapel.items():
-            if m_idx.upper() == m_upper:
-              selected_for_m = g
-              break
-          if selected_for_m:
-            mgmp_teachers.add(selected_for_m)
-            mgmp_teacher_mapel_restrictions.append(
-                (selected_for_m, m_upper, h_mgmp)
-            )
-            mgmp_info_list.append({
-                "Mata_Pelajaran": m_upper,
-                "Hari_MGMP": h_mgmp,
-                "Guru_Yang_Datang_MGMP": selected_for_m,
-                "Kategori": "Otomatis 1 Guru/Mapel",
             })
 
     st.session_state["mgmp_selected_info"] = mgmp_info_list
@@ -609,7 +543,7 @@ if st.button(
                   <= 1
               )
 
-    # RULE 4: Tepat 1 Guru per Kelas per Jam (Tidak Ada Jam Kosong)
+    # RULE 4: Tepat 1 Guru per Kelas per Jam (Pencegahan Jam Kosong)
     for k in KELAS:
       assigned_g_list = [g_i for (g_i, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g_list:
@@ -683,7 +617,6 @@ if st.button(
               active_elements.append(v_block2[(g, k, h, j - 1)])
             if (g, k, h, j) in v_single:
               active_elements.append(v_single[(g, k, h, j)])
-              # Penalti kecil untuk jam 1-an tunggal agar solver memprioritaskan blok 2 jam bila memungkinkan
               penalti_list.append(5.0 * v_single[(g, k, h, j)])
 
             if active_elements and (g, k, h, j) in x:
@@ -787,39 +720,15 @@ if st.button(
                 if j > 4 and (g, k, h, j) in x:
                   model += x[g, k, h, j] == 0
 
-    # RULE 12: Pemerataan Jam Mengajar Guru per Hari
-    if toggle_beban_harian:
-      for g in GURU:
-        assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
-        total_jw_g = sum(pair_jw_dict.get((g, k), 0) for k in assigned_k)
-        target_daily = total_jw_g / len(HARI)
-        for h in HARI:
-          d_dh_plus = pulp.LpVariable(
-              f"ddh_plus_{safe_name(g)}_{safe_name(h)}", lowBound=0
-          )
-          d_dh_minus = pulp.LpVariable(
-              f"ddh_minus_{safe_name(g)}_{safe_name(h)}", lowBound=0
-          )
-          penalti_list.append(10.0 * (d_dh_plus + d_dh_minus))
-          model += (
-              pulp.lpSum([
-                  x[g, k, h, j]
-                  for k in assigned_k
-                  for j in JAM_HARI.get(h, list(range(1, 7)))
-                  if (g, k, h, j) in x
-              ])
-              + d_dh_minus
-              - d_dh_plus
-              == target_daily
-          )
-
-    # Objective Function & Solve
+    # HIERARKI PENALTI UTAMA:
+    # 1. Keterpenuhan Jam Wajib Guru (1.000.000)
+    # 2. PENCEGAHAN KELAS KOSONG (500.000) -> Sangat tinggi agar slot terisi 100%!
     model += (
-        100000.0
+        1000000.0
         * pulp.lpSum([
             d_pair_minus[g, k] + d_pair_plus[g, k] for (g, k) in pair_keys
         ])
-        + 10000.0 * pulp.lpSum([d_c2_minus[key] for key in c2_keys if toggle_c2])
+        + 500000.0 * pulp.lpSum([d_c2_minus[key] for key in c2_keys if toggle_c2])
         + pulp.lpSum(penalti_list)
     )
 
@@ -875,7 +784,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
       and str(h).strip().upper() not in ["NAN", "NONE", "", "NULL"]
   ]
 
-  # 1. PERHITUNGAN PERSENTASE KETERISIAN JAM & KETERPENUHAN
   total_target_jam_guru = int(df_beban["Jam_Wajib"].sum())
   total_realisasi_jam_guru = int(len(df_hasil))
   pct_guru = (
@@ -909,7 +817,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
       f"{total_realisasi_jam_guru}/{total_slot_kbm_sekolah} Slot Terisi",
   )
 
-  # 2. INFORMASI GURU YANG HARUS DATANG MGMP PER MAPEL
   if st.session_state["mgmp_selected_info"]:
     with st.expander(
         "👥 Penugasan Utusan Guru yang Harus Datang MGMP per Mata Pelajaran",
@@ -918,7 +825,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
       df_info_mgmp = pd.DataFrame(st.session_state["mgmp_selected_info"])
       st.dataframe(df_info_mgmp, use_container_width=True)
 
-  # 3. IDENTIFIKASI DETIL JAM KOSONG KELAS & KEKURANGAN JAM GURU
   all_scheduled_slots = set(
       zip(df_hasil["Kelas"], df_hasil["Hari"], df_hasil["Jam_Ke"])
   )
@@ -945,7 +851,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
   )
   df_unfulfilled_g = df_unfulfilled_g[df_unfulfilled_g["Kurang_Jam"] > 0]
 
-  # 4. EXPANDER UNTUK RINCIAN MASALAH (JAM KOSONG & GURU KURANG JAM)
   st.markdown("---")
   c_det1, c_det2 = st.columns(2)
   with c_det1:
@@ -983,49 +888,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
           "✅ **100% Jam Wajib Seluruh Guru Terpenuhi Sesuai Target**"
       )
 
-  # 5. DIAGNOSA PENYEBAB & SARAN REKOMENDASI PERBAIKAN
-  if not df_empty_slots.empty or not df_unfulfilled_g.empty:
-    st.markdown("---")
-    st.subheader("💡 Diagnosa Penyebab & Saran Perbaikan Solver")
-    with st.container():
-      st.markdown("##### 📌 **Diagnosa Penyebab Belum 100% Terpenuhi:**")
-      diag_list = []
-      if total_target_jam_guru < total_slot_kbm_sekolah:
-        diag_list.append(
-            f"**Selisih Beban Mengajar**: Total target jam mengajar guru pada"
-            f" `Guru_Kelas` ({total_target_jam_guru} jam) **lebih kecil** dari"
-            f" total slot KBM sekolah ({total_slot_kbm_sekolah} slot). Secara"
-            f" matematis, pasti tersisa {total_slot_kbm_sekolah - total_target_jam_guru}"
-            " jam kosong di kelas."
-        )
-      if toggle_mgmp:
-        diag_list.append(
-            "**Restriksi MGMP**: Guru utusan MGMP dibatasi hanya mengajar di"
-            " jam ke-1 dan ke-2 pada hari MGMP mapel tersebut. Slot jam ke-3"
-            " s.d. ke-6/7 tidak bisa diisi oleh guru tersebut."
-        )
-      if toggle_pjok:
-        diag_list.append(
-            "**Restriksi PJOK**: Guru Olahraga dibatasi hanya di jam ke-1 s.d."
-            " ke-4, sehingga slot siang tidak bisa diisi guru PJOK."
-        )
-      for d in diag_list:
-        st.write(f"- {d}")
-
-      st.markdown("##### 🛠️ **Saran Rekomendasi Perbaikan:**")
-      st.info(
-          "1. **Gunakan Mode MGMP_P + Bagi Sisa Mapel ke Pengurus**: Mode ini"
-          " memastikan pembagian MGMP terfokus HANYA pada 3 guru pengurus"
-          " (`Is_MGMP_P`), tanpa mengganggu jadwal guru-guru lain.\n2. **Sisa"
-          " 1 Jam Fleksibel Aktif**: Aturan Block Teaching kini telah dilengkapi"
-          " sisa 1 jam fleksibel untuk mengisi jam ke-7 Senin atau slot tunggal"
-          " ganjil.\n3. **Tambah Jam Wajib Guru**: Sesuaikan target jam mengajar"
-          f" pada Tab 4 `Guru_Kelas` agar total jam mendekati total slot sekolah ({total_slot_kbm_sekolah}"
-          " jam)."
-      )
-
-  # 6. TABEL MATRIKS & GRAFIK VISUALISASI
-  st.markdown("---")
   res_tab1, res_tab2, res_tab3, res_tab4 = st.tabs([
       "📅 Jadwal per Kelas",
       "👨‍🏫 Jadwal per Guru",
@@ -1052,7 +914,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
   with res_tab3:
     st.subheader("📈 Grafis & Visualisasi Keterisian Jam")
 
-    # Grafik 1: Target vs Realisasi Jam Guru
     st.markdown("##### 1. Grafik Keterpenuhan Jam Wajib per Guru")
     df_real_total_g = (
         df_hasil.groupby("Guru", as_index=False)["Jam_Ke"]
@@ -1116,7 +977,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
     st.divider()
 
-    # Grafik 2: Keterisian Jam per Kelas (Target 31 Jam)
     st.markdown("##### 2. Grafik Keterisian Jam KBM per Kelas (Target 31 Jam)")
     df_kelas_jam = (
         df_hasil.groupby("Kelas", as_index=False)["Jam_Ke"]
