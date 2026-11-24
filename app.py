@@ -15,18 +15,45 @@ st.set_page_config(
 
 st.title("🏫 Simulator & Optimasi Penjadwalan KBM SMPN 2 Plered")
 st.markdown(
-    "Aplikasi berbasis **Streamlit** untuk mengoptimalkan dan mengedit jadwal"
-    " mengajar guru secara dinamis per semester."
+    "Aplikasi berbasis **Streamlit** dan **Binary Integer Programming (BIP 0-1)** "
+    "untuk mengoptimalkan jadwal mengajar guru dan KBM kelas secara fleksibel."
 )
 
 
 def safe_name(s):
+  """Sanitasi nama variabel untuk PuLP."""
   sc = str(s).strip() if s is not None else "X"
   res = re.sub(r"\W+", "_", sc).strip("_")
   return res if res else "X"
 
 
-# Sidebar 1: Upload File Excel
+def buat_dict_var(nama_prefix, daftar_kunci, lowBound=None, cat=pulp.LpContinuous):
+  """Membuat dictionary variabel keputusan PuLP secara aman."""
+  hasil = {}
+  for k in daftar_kunci:
+    if isinstance(k, (tuple, list)):
+      s_name = "_".join(safe_name(x) for x in k)
+    else:
+      s_name = safe_name(k)
+    var_name = f"{nama_prefix}_{s_name}"
+
+    try:
+      v = pulp.LpVariable(var_name, lowBound=lowBound, cat=cat)
+    except Exception:
+      try:
+        v = pulp.LpVariable(var_name, lowBound=lowBound, upBound=None, cat=cat)
+      except Exception:
+        v = pulp.LpVariable(var_name)
+        if lowBound is not None:
+          v.lowBound = lowBound
+        v.cat = cat
+    hasil[k] = v
+  return hasil
+
+
+# ==========================================
+# SIDEBAR CONTROL: SAKELAR ATURAN (TOGGLES)
+# ==========================================
 st.sidebar.header("📂 1. Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
     "Unggah file Excel (misal: data_jadwal(1).xlsx)", type=["xlsx", "xls"]
@@ -43,30 +70,57 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-# Sidebar 2: Sakelar Aturan & Batasan (Toggles)
 st.sidebar.markdown("---")
 st.sidebar.header("🎛️ 2. Sakelar Aturan & Batasan")
+st.sidebar.caption("Aktifkan atau nonaktifkan aturan optimasi sesuai kebutuhan:")
 
-enable_mgmp = st.sidebar.toggle(
-    "Aturan MGMP (Bebas Mengajar Jam 1-2)", value=True
+toggle_c1 = st.sidebar.toggle(
+    "1. Maksimal 1 Kelas per Guru per Jam", value=True
 )
-enable_wali = st.sidebar.toggle(
-    "Aturan Wali Kelas (Jumat Jam 1)", value=True
+toggle_c2 = st.sidebar.toggle(
+    "2. Tepat 1 Guru per Kelas per Jam (Tidak Ada Jam Kosong)", value=True
 )
-enable_wakasek = st.sidebar.toggle(
-    "Aturan Wakasek (Maks 1 di Jam 1)", value=True
+toggle_c3 = st.sidebar.toggle(
+    "3. Pemenuhan Target Wajib Jam Mengajar (Guru-Kelas)", value=True
 )
-enable_pjok = st.sidebar.toggle(
-    "Aturan PJOK (Maksimal Jam ke-4)", value=True
+toggle_block2 = st.sidebar.toggle(
+    "4. Block Teaching 2 Jam (Mod 2 & Berurutan)", value=True
 )
-enable_daily_limits = st.sidebar.toggle(
-    "Batas Jam Harian (5/4/3/2 Jam)", value=True
-)
-enable_gap_rule = st.sidebar.toggle(
-    "Block Teaching Kontinu (Tanpa Jeda)", value=True
+toggle_jam1_guru = st.sidebar.toggle(
+    "5. Pemerataan Jam ke-1 per Guru", value=True
 )
 
-# Load Sheets
+# Rule 8: MGMP Options
+toggle_mgmp = st.sidebar.toggle(
+    "6. Aturan Penanggung Jawab MGMP (Maksimal Jam ke-2)", value=True
+)
+mgmp_mode = "Gunakan Status Guru (Is_MGMP)"
+manual_mgmp_teachers = []
+if toggle_mgmp:
+  mgmp_mode = st.sidebar.radio(
+      "Mode Pemilihan Guru MGMP:",
+      [
+          "Gunakan Status Guru (Is_MGMP)",
+          "Pilih Manual Guru MGMP",
+          "Otomatis 1 Guru per Mapel MGMP",
+      ],
+      key="mgmp_mode_radio",
+  )
+
+toggle_wali = st.sidebar.toggle(
+    "7. Aturan Wali Kelas (Jumat Jam ke-1)", value=True
+)
+toggle_wakasek = st.sidebar.toggle(
+    "8. Aturan Wakasek (Maksimal 1 di Jam ke-1 per Hari)", value=True
+)
+toggle_pjok = st.sidebar.toggle(
+    "9. Aturan PJOK (Maksimal Jam 1 s.d. 4)", value=True
+)
+toggle_beban_harian = st.sidebar.toggle(
+    "10. Pemerataan Jam Mengajar Guru per Hari", value=True
+)
+
+# Data Inisialisasi
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
     "Jumlah_Jam_KBM": (7, 6, 6, 6, 6),
@@ -156,6 +210,15 @@ with tab_beban:
       num_rows="dynamic",
       use_container_width=True,
       key="ed_beban",
+  )
+
+# Form Manual MGMP Selection jika mode Manual dipilih
+if toggle_mgmp and mgmp_mode == "Pilih Manual Guru MGMP":
+  all_teachers_list = sorted(
+      list(set(df_status_raw["Guru"].dropna().astype(str).str.strip()))
+  )
+  manual_mgmp_teachers = st.sidebar.multiselect(
+      "Pilih Nama-Nama Guru MGMP:", options=all_teachers_list, default=[]
   )
 
 st.divider()
@@ -314,23 +377,34 @@ if st.button(
         zip(zip(df_pair["Guru"], df_pair["Kelas"]), df_pair["Jam_Wajib"])
     )
 
+    # Evaluasi Penentuan Guru MGMP
     mgmp_teachers = set()
-    for g in GURU:
-      st_info = status_dict.get(g, {})
-      val = st_info.get("Is_MGMP")
-      if pd.notna(val) and str(val).strip().upper() in [
-          "1",
-          "1.0",
-          "TRUE",
-          "Y",
-          "YES",
-      ]:
-        mgmp_teachers.add(g)
+    if toggle_mgmp:
+      if mgmp_mode == "Gunakan Status Guru (Is_MGMP)":
+        for g in GURU:
+          st_info = status_dict.get(g, {})
+          val = st_info.get("Is_MGMP")
+          if pd.notna(val) and str(val).strip().upper() in [
+              "1",
+              "1.0",
+              "TRUE",
+              "Y",
+              "YES",
+          ]:
+            mgmp_teachers.add(g)
+      elif mgmp_mode == "Pilih Manual Guru MGMP":
+        mgmp_teachers = set(manual_mgmp_teachers)
+      elif mgmp_mode == "Otomatis 1 Guru per Mapel MGMP":
+        for m_name in HARI_MGMP_MAPEL.keys():
+          for (g, k), m_idx in pair_mapel.items():
+            if m_idx.upper() == m_name:
+              mgmp_teachers.add(g)
+              break
 
-    # Inisialisasi PuLP Model
+    # PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
-    # 1. Decision Variables
+    # 1. Variabel Keputusan Biner x(g, k, h, j)
     var_keys = [
         (g, k, h, j)
         for (g, k) in valid_gk_pairs
@@ -345,7 +419,7 @@ if st.button(
         for (g, k, h, j) in var_keys
     }
 
-    # 2. Workload deviation variables
+    # Variabel Deviasi
     pair_keys = list(valid_gk_pairs)
     d_pair_minus = {
         (g, k): pulp.LpVariable(
@@ -360,7 +434,6 @@ if st.button(
         for (g, k) in pair_keys
     }
 
-    # 3. Empty class deviation variables
     c2_keys = [
         (k, h, j)
         for k in KELAS
@@ -369,85 +442,64 @@ if st.button(
     ]
     d_c2_minus = {
         (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}",
-            lowBound=0,
+            f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}", lowBound=0
         )
         for (k, h, j) in c2_keys
     }
 
-    # 4. Teacher daily workload variables
-    dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = {
-        (g, h): pulp.LpVariable(
-            f"dh_plus_{safe_name(g)}_{safe_name(h)}", lowBound=0
-        )
-        for (g, h) in dh_keys
-    }
-    d_h_minus = {
-        (g, h): pulp.LpVariable(
-            f"dh_minus_{safe_name(g)}_{safe_name(h)}", lowBound=0
-        )
-        for (g, h) in dh_keys
-    }
-
     penalti_list = []
 
-    # C1: Max 1 Class per Teacher per Slot
-    for g in GURU:
-      assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
-      if assigned_k:
-        for h in HARI:
-          for j in JAM_HARI.get(h, list(range(1, 7))):
-            model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
+    # RULE 3: Maksimal 1 Kelas per Guru per Jam (Toggle 1)
+    if toggle_c1:
+      for g in GURU:
+        assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+        if assigned_k:
+          for h in HARI:
+            for j in JAM_HARI.get(h, list(range(1, 7))):
+              model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
 
-    # C2: Exactly 1 Teacher per Class per Slot
+    # RULE 4: Tepat 1 Guru per Kelas per Jam (Tidak Ada Jam Kelas Kosong) (Toggle 2)
     for k in KELAS:
       assigned_g_list = [g_i for (g_i, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g_list:
         for h in HARI:
           for j in JAM_HARI.get(h, list(range(1, 7))):
-            model += (
-                pulp.lpSum([x[g_i, k, h, j] for g_i in assigned_g_list])
-                + d_c2_minus[k, h, j]
-                == 1
-            )
+            if toggle_c2:
+              # Bobot sangat berat untuk mencegah jam kosong
+              model += (
+                  pulp.lpSum([x[g_i, k, h, j] for g_i in assigned_g_list])
+                  + d_c2_minus[k, h, j]
+                  == 1
+              )
+            else:
+              model += (
+                  pulp.lpSum([x[g_i, k, h, j] for g_i in assigned_g_list]) <= 1
+              )
 
-    # C3: Workload Target
+    # RULE 5: Target Jam Wajib Guru-Kelas (Toggle 3)
     for _, row in df_pair.iterrows():
       g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
-      model += (
-          pulp.lpSum([
-              x[g, k, h, j]
-              for h in HARI
-              for j in JAM_HARI.get(h, list(range(1, 7)))
-          ])
-          + d_pair_minus[g, k]
-          - d_pair_plus[g, k]
-          == jw
-      )
+      if toggle_c3:
+        model += (
+            pulp.lpSum([
+                x[g, k, h, j]
+                for h in HARI
+                for j in JAM_HARI.get(h, list(range(1, 7)))
+            ])
+            + d_pair_minus[g, k]
+            - d_pair_plus[g, k]
+            == jw
+        )
 
-    # DYNAMIC RULE 1: Batas Jam Harian (5/4/3/2 Jam)
-    if enable_daily_limits:
+    # RULE 6: Block Teaching 2 Jam (Mod 2 & Berurutan Tanpa Jeda) (Toggle 4)
+    if toggle_block2:
       for (g, k), jw in pair_jw_dict.items():
         max_daily = 3 if jw == 5 else (2 if jw in (2, 3, 4) else 1)
         for h in HARI:
-          p_day = pulp.LpVariable(
-              f"p_day_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}", lowBound=0
-          )
-          penalti_list.append(20000.0 * p_day)
-          model += (
-              pulp.lpSum([
-                  x[g, k, h, j] for j in JAM_HARI.get(h, list(range(1, 7)))
-              ])
-              - p_day
-              <= max_daily
-          )
-
-    # DYNAMIC RULE 2: Block Teaching Kontinu (Tanpa Jeda)
-    if enable_gap_rule:
-      for g, k in valid_gk_pairs:
-        for h in HARI:
           j_list = JAM_HARI.get(h, list(range(1, 7)))
+          # Limit harian per pasangan
+          model += pulp.lpSum([x[g, k, h, j] for j in j_list]) <= max_daily
+          # No-Gap Constraint
           for idx in range(len(j_list) - 2):
             j1, j2, j3 = j_list[idx], j_list[idx + 1], j_list[idx + 2]
             z_gap = pulp.LpVariable(
@@ -459,8 +511,23 @@ if st.button(
                 x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap <= 1
             )
 
-    # DYNAMIC RULE 3: Aturan MGMP
-    if enable_mgmp:
+    # RULE 7: Pemerataan Jam ke-1 per Guru (Toggle 5)
+    if toggle_jam1_guru:
+      target_jam1 = int(round(len(HARI) * len(KELAS) / max(1, len(GURU))))
+      for g in GURU:
+        d_j1_plus = pulp.LpVariable(f"dj1_plus_{safe_name(g)}", lowBound=0)
+        d_j1_minus = pulp.LpVariable(f"dj1_minus_{safe_name(g)}", lowBound=0)
+        penalti_list.append(500.0 * (d_j1_plus + d_j1_minus))
+        assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+        model += (
+            pulp.lpSum([x[g, k, h, 1] for h in HARI for k in assigned_k])
+            + d_j1_minus
+            - d_j1_plus
+            == target_jam1
+        )
+
+    # RULE 8: Aturan MGMP (Toggle 6)
+    if toggle_mgmp and mgmp_teachers:
       for g in mgmp_teachers:
         st_info = status_dict.get(g, {})
         mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
@@ -474,15 +541,10 @@ if st.button(
             for k in assigned_k:
               for j in JAM_HARI.get(h_mgmp, list(range(1, 7))):
                 if j > 2:
-                  p_mgmp = pulp.LpVariable(
-                      f"p_mgmp_{safe_name(g)}_{safe_name(k)}_{safe_name(h_mgmp)}_{j}",
-                      lowBound=0,
-                  )
-                  penalti_list.append(50000.0 * p_mgmp)
-                  model += x[g, k, h_mgmp, j] - p_mgmp <= 0
+                  model += x[g, k, h_mgmp, j] == 0
 
-    # DYNAMIC RULE 4: Aturan Wali Kelas (Jumat Jam 1)
-    if enable_wali:
+    # RULE 9: Wali Kelas (Jumat Jam ke-1) (Toggle 7)
+    if toggle_wali:
       for g in GURU:
         st_info = status_dict.get(g, {})
         is_wali_val = st_info.get("Is_Wali")
@@ -500,8 +562,8 @@ if st.button(
               penalti_list.append(1000.0 * p_c6)
               model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
-    # DYNAMIC RULE 5: Aturan Wakasek
-    if enable_wakasek:
+    # RULE 10: Wakasek Bergantian Jam ke-1 (Toggle 8)
+    if toggle_wakasek:
       wakasek_teachers = [
           g
           for g in GURU
@@ -514,14 +576,12 @@ if st.button(
       ]
       if wakasek_pairs:
         for h in HARI:
-          p_wak = pulp.LpVariable(f"penalti_wakasek_{safe_name(h)}", lowBound=0)
-          penalti_list.append(1000.0 * p_wak)
           model += (
-              pulp.lpSum([x[g, k, h, 1] for (g, k) in wakasek_pairs]) - p_wak <= 1
+              pulp.lpSum([x[g, k, h, 1] for (g, k) in wakasek_pairs]) <= 1
           )
 
-    # DYNAMIC RULE 6: Aturan PJOK
-    if enable_pjok:
+    # RULE 11: PJOK Jam 1 s.d. 4 (Toggle 9)
+    if toggle_pjok:
       for g in GURU:
         is_pjok_val = status_dict.get(g, {}).get("Is_PJOK")
         if pd.notna(is_pjok_val) and str(is_pjok_val).strip().upper() in [
@@ -536,12 +596,32 @@ if st.button(
             for k in assigned_k:
               for j in JAM_HARI.get(h, list(range(1, 7))):
                 if j > 4:
-                  p_c8 = pulp.LpVariable(
-                      f"penalti_pjok_{safe_name(g)}_{safe_name(h)}_{safe_name(k)}_{j}",
-                      lowBound=0,
-                  )
-                  penalti_list.append(1000.0 * p_c8)
-                  model += x[g, k, h, j] - p_c8 <= 0
+                  model += x[g, k, h, j] == 0
+
+    # RULE 12: Pemerataan Jam Mengajar Harian Guru (Toggle 10)
+    if toggle_beban_harian:
+      for g in GURU:
+        assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+        total_jw_g = sum(pair_jw_dict.get((g, k), 0) for k in assigned_k)
+        target_daily = total_jw_g / len(HARI)
+        for h in HARI:
+          d_dh_plus = pulp.LpVariable(
+              f"ddh_plus_{safe_name(g)}_{safe_name(h)}", lowBound=0
+          )
+          d_dh_minus = pulp.LpVariable(
+              f"ddh_minus_{safe_name(g)}_{safe_name(h)}", lowBound=0
+          )
+          penalti_list.append(10.0 * (d_dh_plus + d_dh_minus))
+          model += (
+              pulp.lpSum([
+                  x[g, k, h, j]
+                  for k in assigned_k
+                  for j in JAM_HARI.get(h, list(range(1, 7)))
+              ])
+              + d_dh_minus
+              - d_dh_plus
+              == target_daily
+          )
 
     # Objective Function
     model += (
@@ -549,12 +629,9 @@ if st.button(
         * pulp.lpSum([
             d_pair_minus[g, k] + d_pair_plus[g, k] for (g, k) in pair_keys
         ])
-        + 10000.0 * pulp.lpSum([d_c2_minus[key] for key in c2_keys])
+        + 10000.0
+        * pulp.lpSum([d_c2_minus[key] for key in c2_keys if toggle_c2])
         + pulp.lpSum(penalti_list)
-        + 2.0
-        * pulp.lpSum([
-            d_h_plus[g, h] + d_h_minus[g, h] for g in GURU for h in HARI
-        ])
     )
 
     solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.01)
@@ -610,7 +687,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
   st.success("✅ Status Optimasi: Solusi Optimal Ditemukan & Tersimpan.")
 
-  # --- EVALUASI KETERPENUHAN JAM GURU & KELAS ---
+  # EVALUASI KETERPENUHAN JAM GURU & KELAS
   total_target_jam_guru = df_beban["Jam_Wajib"].sum()
   total_realisasi_jam_guru = len(df_hasil)
   pct_guru = (
@@ -643,7 +720,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
       f"{total_realisasi_jam_guru}/{total_slot_kbm_sekolah} Slot Terisi",
   )
 
-  # Box Penjelasan Rincian Keterpenuhan Jam
   st.info(
       "📌 **Rincian Evaluasi Keterpenuhan Jam:**\n"
       f"- **Keterpenuhan Jam Guru**: **{pct_guru:.1f}%** ({total_realisasi_jam_guru}"
@@ -830,7 +906,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
     st.divider()
 
-    # 1. Grafik Keterpenuhan Jam Guru
+    # Grafik Keterpenuhan Jam Guru
     st.markdown("##### 1. Grafik Target vs Realisasi Jam Mengajar Guru")
     df_realisasi = (
         df_hasil.groupby("Guru", as_index=False)["Jam_Ke"]
