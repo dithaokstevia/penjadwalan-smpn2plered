@@ -15,7 +15,8 @@ st.set_page_config(
 st.title("🏫 Simulator & Optimasi Penjadwalan KBM SMPN 2 Plered")
 st.markdown(
     "Aplikasi berbasis **Streamlit** dan **Binary Integer Programming (BIP 0-1)**"
-    " untuk mengoptimalkan jadwal mengajar guru secara dinamis."
+    " untuk mengoptimalkan jadwal mengajar guru secara dinamis dengan evaluasi"
+    " diagnostik lengkap."
 )
 
 
@@ -30,7 +31,6 @@ def sanitize_dataframe(df):
         .strip()
         for col in df.columns
     ]
-  df = df.loc[:, ~df.columns.duplicated()].copy()
   df.columns = [str(c).strip() for c in df.columns]
   return df
 
@@ -153,7 +153,7 @@ toggle_beban_harian = st.sidebar.toggle(
 
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM":,
+    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -173,7 +173,7 @@ df_beban_init = pd.DataFrame({
     "Guru": ["Guru A", "Guru B", "Guru C"],
     "Kelas": ["7A", "7B", "7C"],
     "Mata_Pelajaran": ["IPA", "MATEMATIKA", "BAHASA INDONESIA"],
-    "Jam_Wajib":,
+    "Jam_Wajib": [4, 4, 4],
 })
 
 if excel_path is not None:
@@ -954,7 +954,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
 
   # Helper function for drawing visual schedule grid
-  def draw_schedule_grid(title, df_grid, col_label="Mata Pelajaran / Detail"):
+  def draw_schedule_grid(title, df_grid):
     fig, ax = plt.subplots(figsize=(10, max(4, len(df_grid) * 0.7)))
     ax.axis("off")
     ax.set_title(
@@ -996,7 +996,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
 
   # ------------------------------------------------------------------
-  # TAB 1: JADWAL SETIAP KELAS (Dulu named Jadwal per Kelas)
+  # TAB 1: JADWAL SETIAP KELAS (Matriks Keseluruhan)
   # ------------------------------------------------------------------
   with res_tab1:
     st.subheader("📅 Matriks Jadwal KBM Setiap Kelas (Seluruh Rombel)")
@@ -1017,7 +1017,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     )
 
   # ------------------------------------------------------------------
-  # TAB 2: JADWAL PER KELAS (Tab Baru dengan Pilihan Dropdown Kelas)
+  # TAB 2: JADWAL PER KELAS (Dropdown Pilihan Kelas)
   # ------------------------------------------------------------------
   with res_tab2:
     st.subheader("🏫 Tabel Jadwal Spesifik per Kelas")
@@ -1053,7 +1053,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     )
 
   # ------------------------------------------------------------------
-  # TAB 3: JADWAL PER GURU (Tab Pilihan Guru)
+  # TAB 3: JADWAL PER GURU (Dropdown Pilihan Guru)
   # ------------------------------------------------------------------
   with res_tab3:
     st.subheader("👨‍🏫 Matriks & Tabel Jadwal per Guru")
@@ -1090,7 +1090,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     )
 
   # ------------------------------------------------------------------
-  # TAB 4: VISUALISASI JADWAL PER KELAS (Gambar Plot Graphic)
+  # TAB 4: VISUALISASI JADWAL PER KELAS (Gambar PNG & Excel)
   # ------------------------------------------------------------------
   with res_tab4:
     st.subheader("🖼️ Visualisasi Grafik Gambar Jadwal per Kelas")
@@ -1115,7 +1115,6 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     )
     st.pyplot(fig_k_grid)
 
-    # Save figure to buffer for download
     img_buf_k = io.BytesIO()
     fig_k_grid.savefig(img_buf_k, format="png", dpi=200, bbox_inches="tight")
     img_buf_k.seek(0)
@@ -1146,7 +1145,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
       )
 
   # ------------------------------------------------------------------
-  # TAB 5: VISUALISASI JADWAL PER GURU (Gambar Plot Graphic)
+  # TAB 5: VISUALISASI JADWAL PER GURU (Gambar PNG & Excel)
   # ------------------------------------------------------------------
   with res_tab5:
     st.subheader("🖼️ Visualisasi Grafik Gambar Jadwal per Guru")
