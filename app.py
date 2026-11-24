@@ -249,7 +249,7 @@ if st.button(
     type="primary",
     use_container_width=True,
 ):
-  with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)...\"):
+  with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
     INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
 
     df_beban_raw = flatten_columns(df_beban_raw)
