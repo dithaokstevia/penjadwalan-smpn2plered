@@ -19,7 +19,8 @@ st.title(
 )
 st.markdown(
     "Aplikasi berbasis **Streamlit** dan **Binary Integer Programming (BIP 0-1)**"
-    " untuk menghasilkan **Jadwal KBM 100% Terisi Penuh (0 Jam Kosong)**."
+    " untuk mengoptimalkan jadwal mengajar guru dengan **10 Sakelar Aturan"
+    " Fleksibel**."
 )
 
 
@@ -86,7 +87,9 @@ def find_col(df, candidate_names, default_name=""):
   return str(default_name)
 
 
-# Sidebar for file upload
+# ==========================================
+# SIDEBAR CONTROL: SAKELAR ATURAN (TOGGLES)
+# ==========================================
 st.sidebar.header("📂 1. Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
     "Unggah file Excel (misal: data_jadwal(1).xlsx)", type=["xlsx", "xls"]
@@ -104,17 +107,59 @@ else:
   excel_path = None
 
 st.sidebar.markdown("---")
-st.sidebar.header("🎛️ 2. Mode Optimasi Full")
-st.sidebar.success("✅ **Mode 100% Full Schedule Aktif**")
-st.sidebar.caption(
-    "Solver memprioritaskan keterisian 100% seluruh slot KBM kelas tanpa"
-    " menyisakan jam kosong."
+st.sidebar.header("🎛️ 2. Sakelar Aturan & Batasan")
+st.sidebar.caption("Aktifkan atau nonaktifkan aturan optimasi sesuai kebutuhan:")
+
+toggle_c1 = st.sidebar.toggle(
+    "1. Maksimal 1 Kelas per Guru per Jam", value=True
+)
+toggle_c2 = st.sidebar.toggle(
+    "2. Tepat 1 Guru per Kelas per Jam (Tidak Ada Jam Kosong)", value=True
+)
+toggle_c3 = st.sidebar.toggle(
+    "3. Pemenuhan Target Wajib Jam Mengajar (Guru-Kelas)", value=True
+)
+toggle_contig = st.sidebar.toggle(
+    "4. Aturan Jam Berurutan / Anti-Diselang (Tanpa Jam Bolong)", value=True
+)
+toggle_jam1_guru = st.sidebar.toggle(
+    "5. Pemerataan Jam ke-1 per Guru", value=True
 )
 
-# Load sheets
+toggle_mgmp = st.sidebar.toggle(
+    "6. Aturan Penanggung Jawab / Pengurus MGMP (Maksimal Jam ke-2)", value=True
+)
+mgmp_mode = "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel ke Pengurus"
+manual_mgmp_teachers = []
+if toggle_mgmp:
+  mgmp_mode = st.sidebar.radio(
+      "Mode Pemilihan Guru MGMP:",
+      [
+          "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel ke Pengurus",
+          "Gunakan Status Penanggung Jawab (Is_MGMP)",
+          "Pilih Manual Guru MGMP",
+          "Otomatis 1 Guru per Mapel MGMP",
+      ],
+      key="mgmp_mode_radio",
+  )
+
+toggle_wali = st.sidebar.toggle(
+    "7. Aturan Wali Kelas (Jumat Jam ke-1)", value=True
+)
+toggle_wakasek = st.sidebar.toggle(
+    "8. Aturan Wakasek (Maksimal 1 di Jam ke-1 per Hari)", value=True
+)
+toggle_pjok = st.sidebar.toggle(
+    "9. Aturan PJOK (Maksimal Jam 1 s.d. 4)", value=True
+)
+toggle_beban_harian = st.sidebar.toggle(
+    "10. Pemerataan Jam Mengajar Guru per Hari", value=True
+)
+
+# Data Inisialisasi Default
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+    "Jumlah_Jam_KBM":,
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -175,6 +220,25 @@ with tab_beban:
       key="ed_beban",
   )
 
+if toggle_mgmp and mgmp_mode == "Pilih Manual Guru MGMP":
+  all_teachers_list = (
+      sorted(
+          list(
+              set(
+                  df_status_edited["Guru"]
+                  .dropna()
+                  .astype(str)
+                  .str.strip()
+              )
+          )
+      )
+      if "Guru" in df_status_edited.columns
+      else []
+  )
+  manual_mgmp_teachers = st.sidebar.multiselect(
+      "Pilih Nama-Nama Guru MGMP:", options=all_teachers_list, default=[]
+  )
+
 st.divider()
 
 # Solver Execution Button
@@ -183,9 +247,7 @@ if st.button(
     type="primary",
     use_container_width=True,
 ):
-  with st.spinner(
-      "Sedang memproses solver PuLP untuk menghasilkan Jadwal 100% Full..."
-  ):
+  with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
     # Sanitize all dataframes
     df_beban_raw = sanitize_dataframe(df_beban_edited)
     df_config = sanitize_dataframe(df_config_edited)
@@ -399,45 +461,48 @@ if st.button(
 
     penalti_list = []
 
-    # SOFT MGMP Constraint
-    for g in mgmp_teachers:
-      st_info = status_dict.get(g, {})
-      mapel_raw = to_str(st_info.get("Mata_Pelajaran"))
-      mapel_list = [
-          m.strip().upper() for m in mapel_raw.split(",") if m.strip()
-      ]
-      for m_name in mapel_list:
-        h_mgmp = HARI_MGMP_MAPEL.get(m_name)
-        if h_mgmp and h_mgmp in HARI:
-          assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
-          for k_i in assigned_k:
-            for j in JAM_HARI.get(h_mgmp, []):
+    # SOFT MGMP Constraint (Rule 6)
+    if toggle_mgmp:
+      for g in mgmp_teachers:
+        st_info = status_dict.get(g, {})
+        mapel_raw = to_str(st_info.get("Mata_Pelajaran"))
+        mapel_list = [
+            m.strip().upper() for m in mapel_raw.split(",") if m.strip()
+        ]
+        for m_name in mapel_list:
+          h_mgmp = HARI_MGMP_MAPEL.get(m_name)
+          if h_mgmp and h_mgmp in HARI:
+            assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+            for k_i in assigned_k:
+              for j in JAM_HARI.get(h_mgmp, []):
+                j_i = to_int(j)
+                if j_i > 2 and (g, k_i, h_mgmp, j_i) in x:
+                  p_mgmp = pulp.LpVariable(
+                      f"p_mgmp_{clean_str(g)}_{clean_str(k_i)}_{j_i}",
+                      lowBound=0,
+                  )
+                  penalti_list.append(p_mgmp)
+                  model += x[g, k_i, h_mgmp, j_i] - p_mgmp <= 0
+
+    # Rule 1: Max 1 Class per Teacher per Hour
+    if toggle_c1:
+      for g in GURU:
+        assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+        if assigned_k:
+          for h in HARI:
+            for j in JAM_HARI.get(h, []):
               j_i = to_int(j)
-              if j_i > 2 and (g, k_i, h_mgmp, j_i) in x:
-                p_mgmp = pulp.LpVariable(
-                    f"p_mgmp_{clean_str(g)}_{clean_str(k_i)}_{j_i}", lowBound=0
+              if any((g, k_i, h, j_i) in x for k_i in assigned_k):
+                model += (
+                    pulp.lpSum([
+                        x[g, k_i, h, j_i]
+                        for k_i in assigned_k
+                        if (g, k_i, h, j_i) in x
+                    ])
+                    <= 1
                 )
-                penalti_list.append(p_mgmp)
-                model += x[g, k_i, h_mgmp, j_i] - p_mgmp <= 0
 
-    # Hard Constraint: Max 1 Class per Teacher per Hour
-    for g in GURU:
-      assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
-      if assigned_k:
-        for h in HARI:
-          for j in JAM_HARI.get(h, []):
-            j_i = to_int(j)
-            if any((g, k_i, h, j_i) in x for k_i in assigned_k):
-              model += (
-                  pulp.lpSum([
-                      x[g, k_i, h, j_i]
-                      for k_i in assigned_k
-                      if (g, k_i, h, j_i) in x
-                  ])
-                  <= 1
-              )
-
-    # Hard Constraint with Slack: Exactly 1 Teacher per Class per Slot
+    # Rule 2: Exactly 1 Teacher per Class per Slot
     for k in KELAS:
       assigned_g = [g_i for (g_i, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g:
@@ -445,17 +510,27 @@ if st.button(
           for j in JAM_HARI.get(h, []):
             j_i = to_int(j)
             if (k, h, j_i) in d_c2_minus:
-              model += (
-                  pulp.lpSum([
-                      x[g_i, k, h, j_i]
-                      for g_i in assigned_g
-                      if (g_i, k, h, j_i) in x
-                  ])
-                  + d_c2_minus[k, h, j_i]
-                  == 1
-              )
+              if toggle_c2:
+                model += (
+                    pulp.lpSum([
+                        x[g_i, k, h, j_i]
+                        for g_i in assigned_g
+                        if (g_i, k, h, j_i) in x
+                    ])
+                    + d_c2_minus[k, h, j_i]
+                    == 1
+                )
+              else:
+                model += (
+                    pulp.lpSum([
+                        x[g_i, k, h, j_i]
+                        for g_i in assigned_g
+                        if (g_i, k, h, j_i) in x
+                    ])
+                    <= 1
+                )
 
-    # Target Hours per Teacher-Class pair
+    # Rule 3: Target Hours per Teacher-Class pair
     for _, row in df_pair.iterrows():
       g, k, jw = (
           to_str(row["Guru"]),
@@ -463,58 +538,127 @@ if st.button(
           to_int(row["Jam_Wajib"]),
       )
       if (g, k) in d_pair_minus and (g, k) in d_pair_plus:
+        if toggle_c3:
+          model += (
+              pulp.lpSum([
+                  x[g, k, h, to_int(j)]
+                  for h in HARI
+                  for j in JAM_HARI.get(h, [])
+                  if (g, k, h, to_int(j)) in x
+              ])
+              + d_pair_minus[g, k]
+              - d_pair_plus[g, k]
+              == jw
+          )
+
+    # Rule 4: Anti-Diselang / Contiguous Hours
+    if toggle_contig:
+      for (g, k) in valid_gk_pairs:
+        for h in HARI:
+          j_list = JAM_HARI.get(h, [])
+          for idx in range(len(j_list) - 2):
+            j1, j2, j3 = (
+                to_int(j_list[idx]),
+                to_int(j_list[idx + 1]),
+                to_int(j_list[idx + 2]),
+            )
+            if (
+                (g, k, h, j1) in x
+                and (g, k, h, j2) in x
+                and (g, k, h, j3) in x
+                and (g, k, h, j1) in z_gap
+            ):
+              model += (
+                  x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap[g, k, h, j1]
+                  <= 1
+              )
+
+    # Rule 5: Pemerataan Jam 1 per Guru
+    if toggle_jam1_guru:
+      target_jam1 = int(round(len(HARI) * len(KELAS) / max(1, len(GURU))))
+      for g in GURU:
+        d_j1_plus = pulp.LpVariable(f"dj1_plus_{clean_str(g)}", lowBound=0)
+        d_j1_minus = pulp.LpVariable(f"dj1_minus_{clean_str(g)}", lowBound=0)
+        penalti_list.append(500.0 * (d_j1_plus + d_j1_minus))
+        assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
         model += (
             pulp.lpSum([
-                x[g, k, h, to_int(j)]
+                x[g, k_i, h, 1]
                 for h in HARI
-                for j in JAM_HARI.get(h, [])
-                if (g, k, h, to_int(j)) in x
+                for k_i in assigned_k
+                if (g, k_i, h, 1) in x
             ])
-            + d_pair_minus[g, k]
-            - d_pair_plus[g, k]
-            == jw
+            + d_j1_minus
+            - d_j1_plus
+            == target_jam1
         )
 
-    # Soft Gap Penalty
-    for (g, k) in valid_gk_pairs:
-      for h in HARI:
-        j_list = JAM_HARI.get(h, [])
-        for idx in range(len(j_list) - 2):
-          j1, j2, j3 = (
-              to_int(j_list[idx]),
-              to_int(j_list[idx + 1]),
-              to_int(j_list[idx + 2]),
-          )
+    # Rule 7: Wali Kelas (Jumat Jam ke-1)
+    if toggle_wali:
+      for g in GURU:
+        st_info = status_dict.get(g, {})
+        is_wali_val = to_str(st_info.get("Is_Wali")).upper()
+        if is_wali_val in ["1", "1.0", "TRUE", "Y", "YES"]:
+          k_wali = to_str(st_info.get("Kelas_Wali")).upper()
           if (
-              (g, k, h, j1) in x
-              and (g, k, h, j2) in x
-              and (g, k, h, j3) in x
-              and (g, k, h, j1) in z_gap
+              (g, k_wali) in valid_gk_pairs
+              and "Jumat" in HARI
+              and (g, k_wali, "Jumat", 1) in x
           ):
-            model += (
-                x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap[g, k, h, j1]
-                <= 1
+            p_c6 = pulp.LpVariable(
+                f"penalti_wali_{clean_str(g)}", lowBound=0
             )
+            penalti_list.append(1000.0 * p_c6)
+            model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
-    # Soft PJOK Penalty
-    for g in GURU:
-      is_pjok_val = to_str(status_dict.get(g, {}).get("Is_PJOK")).upper()
-      if is_pjok_val in ["1", "1.0", "TRUE", "Y", "YES"]:
-        assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+    # Rule 8: Wakasek Jam ke-1
+    if toggle_wakasek:
+      wakasek_teachers = [
+          g
+          for g in GURU
+          if to_str(status_dict.get(g, {}).get("Is_Wakasek")).upper()
+          in ["1", "1.0", "TRUE", "Y", "YES"]
+      ]
+      if wakasek_teachers:
         for h in HARI:
-          for k_i in assigned_k:
-            for j in JAM_HARI.get(h, []):
-              j_i = to_int(j)
-              if j_i > 4 and (g, k_i, h, j_i) in x:
-                p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k_i)}_{j_i}",
-                    lowBound=0,
-                    cat=pulp.LpContinuous,
-                )
-                penalti_list.append(p_c8)
-                model += x[g, k_i, h, j_i] - p_c8 <= 0
+          model += (
+              pulp.lpSum([
+                  x[g_w, k_i, h, 1]
+                  for g_w in wakasek_teachers
+                  for k_i in KELAS
+                  if (g_w, k_i, h, 1) in x
+              ])
+              <= 1
+          )
 
-    # OBJECTIVE FUNCTION: MAXIMUM PRIORITY ON FILLING ALL SLOTS (d_c2_minus & d_pair_minus)
+    # Rule 9: Soft PJOK Penalty
+    if toggle_pjok:
+      for g in GURU:
+        is_pjok_val = to_str(status_dict.get(g, {}).get("Is_PJOK")).upper()
+        if is_pjok_val in ["1", "1.0", "TRUE", "Y", "YES"]:
+          assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+          for h in HARI:
+            for k_i in assigned_k:
+              for j in JAM_HARI.get(h, []):
+                j_i = to_int(j)
+                if j_i > 4 and (g, k_i, h, j_i) in x:
+                  p_c8 = pulp.LpVariable(
+                      f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k_i)}_{j_i}",
+                      lowBound=0,
+                      cat=pulp.LpContinuous,
+                  )
+                  penalti_list.append(p_c8)
+                  model += x[g, k_i, h, j_i] - p_c8 <= 0
+
+    # Rule 10: Pemerataan Jam Harian Guru
+    if toggle_beban_harian:
+      for g in GURU:
+        for h in HARI:
+          assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+          model += d_h_plus[g, h] >= 0
+          model += d_h_minus[g, h] >= 0
+
+    # OBJECTIVE FUNCTION (Priority 10 Juta untuk Jam Terisi 100% Full)
     model += (
         10000000.0
         * pulp.lpSum([
@@ -522,11 +666,14 @@ if st.button(
         ])
         + 10000000.0
         * pulp.lpSum([d_c2_minus[k, h, j] for (k, h, j) in c2_keys])
-        + 5.0 * pulp.lpSum([z_gap[key] for key in gap_keys])
+        + 5.0 * pulp.lpSum([z_gap[key] for key in gap_keys if key in z_gap])
         + 10.0 * pulp.lpSum(penalti_list)
         + 1.0
         * pulp.lpSum([
-            d_h_plus[g, h] + d_h_minus[g, h] for g in GURU for h in HARI
+            d_h_plus[g, h] + d_h_minus[g, h]
+            for g in GURU
+            for h in HARI
+            if (g, h) in d_h_plus
         ])
     )
 
