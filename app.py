@@ -14,13 +14,11 @@ st.set_page_config(
 )
 
 st.title(
-    "🏫 Simulator & Optimasi Penjadwalan KBM SMPN 2 Plered (100% Full"
-    " Schedule)"
+    "🏫 Simulator & Optimasi Penjadwalan KBM SMPN 2 Plered (100% Full Schedule)"
 )
 st.markdown(
-    "Aplikasi berbasis **Streamlit** dan **Binary Integer Programming (BIP 0-1)**"
-    " untuk mengoptimalkan jadwal mengajar guru dengan **10 Sakelar Aturan"
-    " Fleksibel**."
+    "Aplikasi berbasis **Streamlit** dan **Binary Integer Programming (BIP 0-1)** "
+    "untuk mengoptimalkan jadwal mengajar guru dengan **10 Sakelar Aturan Fleksibel**."
 )
 
 
@@ -159,14 +157,19 @@ toggle_beban_harian = st.sidebar.toggle(
 # Data Inisialisasi Default
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM":,
+    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
     "Hari_MGMP": ["Kamis", "Rabu"],
 })
 df_status_init = pd.DataFrame()
-df_beban_init = pd.DataFrame()
+df_beban_init = pd.DataFrame({
+    "Guru": ["Guru A", "Guru B", "Guru C"],
+    "Kelas": ["7A", "7B", "7C"],
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA", "BAHASA INDONESIA"],
+    "Jam_Wajib": [4, 5, 5],
+})
 
 if excel_path is not None:
   try:
