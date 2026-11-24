@@ -67,15 +67,16 @@ toggle_jam1_guru = st.sidebar.toggle(
 )
 
 toggle_mgmp = st.sidebar.toggle(
-    "6. Aturan Penanggung Jawab MGMP (Maksimal Jam ke-2)", value=True
+    "6. Aturan Penanggung Jawab / Pengurus MGMP (Maksimal Jam ke-2)", value=True
 )
-mgmp_mode = "Gunakan Status Guru (Is_MGMP)"
+mgmp_mode = "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel"
 manual_mgmp_teachers = []
 if toggle_mgmp:
   mgmp_mode = st.sidebar.radio(
       "Mode Pemilihan Guru MGMP:",
       [
-          "Gunakan Status Guru (Is_MGMP)",
+          "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel",
+          "Gunakan Status Penanggung Jawab (Is_MGMP)",
           "Pilih Manual Guru MGMP",
           "Otomatis 1 Guru per Mapel MGMP",
       ],
@@ -105,19 +106,20 @@ df_mgmp_init = pd.DataFrame({
     "Hari_MGMP": ["Kamis", "Rabu"],
 })
 df_status_init = pd.DataFrame({
-    "Guru": ["Guru A", "Guru B"],
-    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-    "Is_Wali": ["0", "0"],
-    "Kelas_Wali": ["", ""],
-    "Is_Wakasek": ["0", "0"],
-    "Is_PJOK": ["0", "0"],
-    "Is_MGMP": ["0", "0"],
+    "Guru": ["Guru A", "Guru B", "Guru C"],
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA", "BAHASA INDONESIA"],
+    "Is_Wali": ["0", "0", "0"],
+    "Kelas_Wali": ["", "", ""],
+    "Is_Wakasek": ["0", "0", "0"],
+    "Is_PJOK": ["0", "0", "0"],
+    "Is_MGMP": ["1", "0", "0"],
+    "Is_MGMP_P": ["0", "1", "0"],
 })
 df_beban_init = pd.DataFrame({
-    "Guru": ["Guru A", "Guru B"],
-    "Kelas": ["7A", "7B"],
-    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-    "Jam_Wajib": (4, 4),
+    "Guru": ["Guru A", "Guru B", "Guru C"],
+    "Kelas": ["7A", "7B", "7C"],
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA", "BAHASA INDONESIA"],
+    "Jam_Wajib": (4, 4, 4),
 })
 
 if excel_path is not None:
@@ -349,11 +351,59 @@ if st.button(
         zip(zip(df_pair["Guru"], df_pair["Kelas"]), df_pair["Jam_Wajib"])
     )
 
+    # LOGIKA PEMILIHAN ATURAN GURU MGMP & IS_MGMP_P
     mgmp_teachers = set()
     mgmp_info_list = []
 
     if toggle_mgmp:
-      if mgmp_mode == "Gunakan Status Guru (Is_MGMP)":
+      if mgmp_mode == "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel":
+        mgmp_p_map = {}
+        for g in GURU:
+          st_info = status_dict.get(g, {})
+          val_p = st_info.get("Is_MGMP_P")
+          if pd.notna(val_p) and str(val_p).strip().upper() in [
+              "1",
+              "1.0",
+              "TRUE",
+              "Y",
+              "YES",
+          ]:
+            mapel_raw = str(st_info.get("Mata_Pelajaran", "")).strip().upper()
+            for m in mapel_raw.split(","):
+              if m.strip():
+                mgmp_p_map[m.strip()] = g
+
+        for m_name, h_mgmp in HARI_MGMP_MAPEL.items():
+          m_upper = m_name.upper()
+          if m_upper in mgmp_p_map:
+            g_assigned = mgmp_p_map[m_upper]
+            mgmp_teachers.add(g_assigned)
+            mgmp_info_list.append({
+                "Guru": g_assigned,
+                "Mata_Pelajaran": m_upper,
+                "Hari_MGMP": h_mgmp,
+                "Kategori": "Pengurus MGMP (Is_MGMP_P)",
+            })
+          else:
+            candidates = [
+                g
+                for g in GURU
+                if m_upper
+                in str(status_dict.get(g, {}).get("Mata_Pelajaran", ""))
+                .upper()
+                .split(",")
+            ]
+            if candidates:
+              g_assigned = candidates[0]
+              mgmp_teachers.add(g_assigned)
+              mgmp_info_list.append({
+                  "Guru": g_assigned,
+                  "Mata_Pelajaran": m_upper,
+                  "Hari_MGMP": h_mgmp,
+                  "Kategori": "Pembagian Otomatis Sisa Mapel",
+              })
+
+      elif mgmp_mode == "Gunakan Status Penanggung Jawab (Is_MGMP)":
         for g in GURU:
           st_info = status_dict.get(g, {})
           val = st_info.get("Is_MGMP")
@@ -366,9 +416,11 @@ if st.button(
           ]:
             mgmp_teachers.add(g)
             m_name = st_info.get("Mata_Pelajaran", "-")
-            mgmp_info_list.append(
-                {"Guru": g, "Mata_Pelajaran": m_name, "Sumber": "Status Guru"}
-            )
+            mgmp_info_list.append({
+                "Guru": g,
+                "Mata_Pelajaran": m_name,
+                "Kategori": "Penanggung Jawab (Is_MGMP)",
+            })
 
       elif mgmp_mode == "Pilih Manual Guru MGMP":
         for g in manual_mgmp_teachers:
@@ -377,7 +429,7 @@ if st.button(
             st_info = status_dict.get(g, {})
             m_name = st_info.get("Mata_Pelajaran", "-")
             mgmp_info_list.append(
-                {"Guru": g, "Mata_Pelajaran": m_name, "Sumber": "Pilihan Manual"}
+                {"Guru": g, "Mata_Pelajaran": m_name, "Kategori": "Pilihan Manual"}
             )
 
       elif mgmp_mode == "Otomatis 1 Guru per Mapel MGMP":
@@ -393,7 +445,7 @@ if st.button(
                 "Guru": selected_for_m,
                 "Mata_Pelajaran": m_name,
                 "Hari_MGMP": h_mgmp,
-                "Sumber": "Otomatis System",
+                "Kategori": "Otomatis 1 Guru/Mapel",
             })
 
     st.session_state["mgmp_selected_info"] = mgmp_info_list
@@ -761,10 +813,11 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
       f"{total_realisasi_jam_guru}/{total_slot_kbm_sekolah} Slot Terisi",
   )
 
-  # 2. INFORMASI GURU MGMP TERPILIH (JIKA OTOMATIS)
+  # 2. INFORMASI GURU MGMP & IS_MGMP_P TERPILIH
   if st.session_state["mgmp_selected_info"]:
     with st.expander(
-        "👥 Informasi Guru Penanggung Jawab MGMP Terpilih", expanded=True
+        "👥 Informasi Guru Penanggung Jawab & Pengurus MGMP (Is_MGMP_P) Terpilih",
+        expanded=True,
     ):
       st.dataframe(
           pd.DataFrame(st.session_state["mgmp_selected_info"]),
@@ -853,9 +906,9 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
         )
       if toggle_mgmp:
         diag_list.append(
-            "**Restriksi MGMP**: Guru MGMP dibatasi hanya boleh mengajar di jam"
-            " ke-1 dan ke-2 pada hari MGMP. Hal ini menutup slot jam ke-3 s.d."
-            " ke-6/7 untuk kelas tersebut."
+            "**Restriksi MGMP**: Guru penanggung jawab / pengurus MGMP dibatasi"
+            " hanya mengajar di jam ke-1 dan ke-2 pada hari MGMP. Hal ini"
+            " menutup slot jam ke-3 s.d. ke-6/7."
         )
       if toggle_pjok:
         diag_list.append(
@@ -873,13 +926,14 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
       st.markdown("##### 🛠️ **Saran Rekomendasi Perbaikan:**")
       st.info(
-          "1. **Tambah Jam Wajib Guru**: Sesuaikan target jam mengajar pada"
-          " Tab 4 `Guru_Kelas` agar total jam mendekati total slot sekolah"
-          f" ({total_slot_kbm_sekolah} jam).\n2. **Longgarkan Aturan Khusus**:"
-          " Coba nonaktifkan sementara toggle *Aturan MGMP* atau *PJOK* di"
-          " Sidebar untuk melihat apakah jadwal bisa terisi 100%.\n3. **Ubah"
-          " Mode MGMP**: Gunakan mode *Otomatis 1 Guru per Mapel MGMP* agar"
-          " pembatasan MGMP penyebarannya lebih fleksibel."
+          "1. **Gunakan Mode MGMP_P + Bagi Sisa Mapel**: Pilih mode *"
+          "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel* di Sidebar agar"
+          " restriksi MGMP terfokus pada pengurus saja.\n2. **Tambah Jam Wajib"
+          " Guru**: Sesuaikan target jam mengajar pada Tab 4 `Guru_Kelas` agar"
+          " total jam mendekati total slot sekolah ({total_slot_kbm_sekolah}"
+          " jam).\n3. **Longgarkan Aturan Khusus**: Coba nonaktifkan sementara"
+          " toggle *Aturan MGMP* atau *PJOK* di Sidebar untuk melihat apakah"
+          " jadwal bisa terisi 100%."
       )
 
   # 6. TABEL MATRIKS & GRAFIK VISUALISASI
