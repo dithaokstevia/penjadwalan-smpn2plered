@@ -169,9 +169,17 @@ if st.button(
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
     INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
 
-    col_guru = "Guru" if "Guru" in df_beban_raw.columns else df_beban_raw.columns[0]
-    col_kelas = "Kelas" if "Kelas" in df_beban_raw.columns else df_beban_raw.columns[1]
-    col_jw = "Jam_Wajib" if "Jam_Wajib" in df_beban_raw.columns else df_beban_raw.columns[-1]
+    col_guru = (
+        "Guru" if "Guru" in df_beban_raw.columns else df_beban_raw.columns[0]
+    )
+    col_kelas = (
+        "Kelas" if "Kelas" in df_beban_raw.columns else df_beban_raw.columns[1]
+    )
+    col_jw = (
+        "Jam_Wajib"
+        if "Jam_Wajib" in df_beban_raw.columns
+        else df_beban_raw.columns[-1]
+    )
 
     df_beban_raw[col_guru] = (
         df_beban_raw[col_guru].replace(r"^\s*$", None, regex=True).ffill()
@@ -192,7 +200,9 @@ if st.button(
         & (df_beban_raw[col_jw] > 0)
     ].copy()
 
-    col_status_guru = "Guru" if "Guru" in df_status_raw.columns else df_status_raw.columns[0]
+    col_status_guru = (
+        "Guru" if "Guru" in df_status_raw.columns else df_status_raw.columns[0]
+    )
     df_status_raw[col_status_guru] = (
         df_status_raw[col_status_guru].astype(str).str.strip()
     )
@@ -218,7 +228,11 @@ if st.button(
     df_pair = df_pair[df_pair["Jam_Wajib"] > 0].copy()
 
     col_hari = "Hari" if "Hari" in df_config.columns else df_config.columns[0]
-    col_jam_count = "Jumlah_Jam_KBM" if "Jumlah_Jam_KBM" in df_config.columns else df_config.columns[1]
+    col_jam_count = (
+        "Jumlah_Jam_KBM"
+        if "Jumlah_Jam_KBM" in df_config.columns
+        else df_config.columns[1]
+    )
 
     df_config[col_jam_count] = (
         pd.to_numeric(df_config[col_jam_count], errors="coerce")
@@ -248,8 +262,16 @@ if st.button(
       if h not in JAM_HARI:
         JAM_HARI[h] = list(range(1, 7))
 
-    col_mgmp_mapel = "Mata_Pelajaran" if "Mata_Pelajaran" in df_mgmp_rule.columns else df_mgmp_rule.columns[0]
-    col_mgmp_hari = "Hari_MGMP" if "Hari_MGMP" in df_mgmp_rule.columns else df_mgmp_rule.columns[1]
+    col_mgmp_mapel = (
+        "Mata_Pelajaran"
+        if "Mata_Pelajaran" in df_mgmp_rule.columns
+        else df_mgmp_rule.columns[0]
+    )
+    col_mgmp_hari = (
+        "Hari_MGMP"
+        if "Hari_MGMP" in df_mgmp_rule.columns
+        else df_mgmp_rule.columns[1]
+    )
 
     HARI_MGMP_MAPEL = dict(
         zip(
@@ -258,7 +280,11 @@ if st.button(
         )
     )
 
-    col_mapel_beban = "Mata_Pelajaran" if "Mata_Pelajaran" in df_beban_raw.columns else "Mapel"
+    col_mapel_beban = (
+        "Mata_Pelajaran"
+        if "Mata_Pelajaran" in df_beban_raw.columns
+        else "Mapel"
+    )
     status_dict = (
         df_status.set_index(col_status_guru).to_dict("index")
         if not df_status.empty
@@ -366,7 +392,7 @@ if st.button(
 
     penalti_list = []
 
-    # C1: Max 1 Class per Teacher per Slot (Selalu Aktif)
+    # C1: Max 1 Class per Teacher per Slot
     for g in GURU:
       assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
       if assigned_k:
@@ -374,19 +400,19 @@ if st.button(
           for j in JAM_HARI.get(h, list(range(1, 7))):
             model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
 
-    # C2: Exactly 1 Teacher per Class per Slot (Selalu Aktif)
+    # C2: Exactly 1 Teacher per Class per Slot
     for k in KELAS:
-      assigned_g = [g for (g_i, k_i) in valid_gk_pairs if k_i == k]
-      if assigned_g:
+      assigned_g_list = [g_i for (g_i, k_i) in valid_gk_pairs if k_i == k]
+      if assigned_g_list:
         for h in HARI:
           for j in JAM_HARI.get(h, list(range(1, 7))):
             model += (
-                pulp.lpSum([x[g, k, h, j] for g in assigned_g])
+                pulp.lpSum([x[g_i, k, h, j] for g_i in assigned_g_list])
                 + d_c2_minus[k, h, j]
                 == 1
             )
 
-    # C3: Workload Target (Selalu Aktif)
+    # C3: Workload Target
     for _, row in df_pair.iterrows():
       g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
       model += (
