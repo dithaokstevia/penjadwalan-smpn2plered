@@ -16,8 +16,7 @@ st.set_page_config(
 st.title("🏫 Simulator & Optimasi Penjadwalan KBM SMPN 2 Plered")
 st.markdown(
     "Aplikasi berbasis **Streamlit** dan **Binary Integer Programming (BIP 0-1)**"
-    " untuk mengoptimalkan jadwal mengajar guru dengan **Evaluasi Diagnostik"
-    " Lengkap**."
+    " untuk mengoptimalkan jadwal mengajar guru secara dinamis."
 )
 
 
@@ -80,7 +79,7 @@ def find_col(df, candidate_names, default_name=""):
       if name.lower() in c.lower() or c.lower() in name.lower():
         return df.columns[idx]
   if len(df.columns) > 0:
-    return df.columns
+    return df.columns[0]
   return str(default_name)
 
 
@@ -176,7 +175,7 @@ df_beban_init = pd.DataFrame({
     "Guru": ["Guru A", "Guru B", "Guru C"],
     "Kelas": ["7A", "7B", "7C"],
     "Mata_Pelajaran": ["IPA", "MATEMATIKA", "BAHASA INDONESIA"],
-    "Jam_Wajib": [5, 5, 6],
+    "Jam_Wajib": [5, 5, 5],
 })
 
 if excel_path is not None:
@@ -937,13 +936,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
           "✅ **100% Jam Wajib Seluruh Guru Terpenuhi Sesuai Target**"
       )
 
-  res_tab1, res_tab2, res_tab3, res_tab4 = st.tabs([
-      "📅 Jadwal per Kelas",
-      "👨‍🏫 Jadwal per Guru",
-      "📊 Visualisasi Grafik Keterisian",
-      "📋 Master Data & Export Excel",
-  ])
-
+  # Pivot Tables
   pivot_kelas = df_hasil.pivot(
       index=["Hari", "Jam_Ke"], columns="Kelas", values="Tampilan_Kelas"
   ).fillna("-")
@@ -952,14 +945,99 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
   ).fillna("-")
   df_master = df_hasil[["Hari", "Jam_Ke", "Kelas", "Mata_Pelajaran", "Guru"]]
 
+  # 4 TABS WITH INDIVIDUAL DOWNLOAD BUTTONS
+  res_tab1, res_tab2, res_tab3, res_tab4 = st.tabs([
+      "📅 Jadwal per Kelas",
+      "👨‍🏫 Jadwal per Guru",
+      "📊 Visualisasi Grafik Keterisian",
+      "📋 Master Data & Export Excel",
+  ])
+
+  # ------------------------------------------------------------------
+  # TAB 1: JADWAL PER KELAS + VISUALISASI GRID + DOWNLOAD BUTTON
+  # ------------------------------------------------------------------
   with res_tab1:
-    st.subheader("Matriks Jadwal KBM per Kelas (Mata Pelajaran & Guru)")
+    st.subheader("📅 Matriks Jadwal KBM per Kelas (Mata Pelajaran & Guru)")
     st.dataframe(pivot_kelas, use_container_width=True)
 
+    st.markdown("---")
+    st.subheader("🖼️ Visualisasi Grafik Grid Jadwal per Kelas")
+    selected_kelas = st.selectbox(
+        "Pilih Kelas (Rombel) untuk Dilihat Visualnya:",
+        options=KELAS,
+        key="sel_k_vis",
+    )
+
+    df_k_vis = df_hasil[df_hasil["Kelas"] == selected_kelas]
+    max_j_k = max([len(JAM_HARI.get(h, [])) for h in HARI]) if HARI else 7
+    grid_k = pd.DataFrame("-", index=list(range(1, max_j_k + 1)), columns=HARI)
+    for _, row in df_k_vis.iterrows():
+      grid_k.loc[row["Jam_Ke"], row["Hari"]] = (
+          f"{row['Mata_Pelajaran']}\n({row['Guru']})"
+      )
+
+    st.dataframe(grid_k, use_container_width=True)
+
+    # Download Button for Tab 1
+    out_k = io.BytesIO()
+    with pd.ExcelWriter(out_k, engine="openpyxl") as writer_k:
+      pivot_kelas.to_excel(writer_k, sheet_name="Jadwal_per_Kelas")
+      grid_k.to_excel(writer_k, sheet_name=f"Visual_Kelas_{selected_kelas}")
+    out_k.seek(0)
+
+    st.download_button(
+        label="📥 Download Excel Jadwal per Kelas (Jadwal_per_Kelas.xlsx)",
+        data=out_k,
+        file_name="Jadwal_per_Kelas_SMPN2Plered.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="dl_tab1",
+    )
+
+  # ------------------------------------------------------------------
+  # TAB 2: JADWAL PER GURU + VISUALISASI GRID + DOWNLOAD BUTTON
+  # ------------------------------------------------------------------
   with res_tab2:
-    st.subheader("Matriks Jadwal KBM per Guru (Kelas & Mata Pelajaran)")
+    st.subheader("👨‍🏫 Matriks Jadwal KBM per Guru (Kelas & Mata Pelajaran)")
     st.dataframe(pivot_guru, use_container_width=True)
 
+    st.markdown("---")
+    st.subheader("🖼️ Visualisasi Grafik Grid Jadwal per Guru")
+    selected_guru = st.selectbox(
+        "Pilih Nama Guru untuk Dilihat Visualnya:", options=GURU, key="sel_g_vis"
+    )
+
+    df_g_vis = df_hasil[df_hasil["Guru"] == selected_guru]
+    max_j_g = max([len(JAM_HARI.get(h, [])) for h in HARI]) if HARI else 7
+    grid_g = pd.DataFrame("-", index=list(range(1, max_j_g + 1)), columns=HARI)
+    for _, row in df_g_vis.iterrows():
+      grid_g.loc[row["Jam_Ke"], row["Hari"]] = (
+          f"Kelas {row['Kelas']}\n({row['Mata_Pelajaran']})"
+      )
+
+    st.dataframe(grid_g, use_container_width=True)
+
+    # Download Button for Tab 2
+    out_g = io.BytesIO()
+    with pd.ExcelWriter(out_g, engine="openpyxl") as writer_g:
+      pivot_guru.to_excel(writer_g, sheet_name="Jadwal_per_Guru")
+      grid_g.to_excel(
+          writer_g, sheet_name=f"Visual_Guru_{clean_str(selected_guru)[:20]}"
+      )
+    out_g.seek(0)
+
+    st.download_button(
+        label="📥 Download Excel Jadwal per Guru (Jadwal_per_Guru.xlsx)",
+        data=out_g,
+        file_name="Jadwal_per_Guru_SMPN2Plered.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="dl_tab2",
+    )
+
+  # ------------------------------------------------------------------
+  # TAB 3: VISUALISASI GRAFIK KETERISIAN + DOWNLOAD BUTTON
+  # ------------------------------------------------------------------
   with res_tab3:
     st.subheader("📈 Grafis & Visualisasi Keterisian Jam")
 
@@ -1072,8 +1150,31 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     st.pyplot(fig_k)
     plt.close(fig_k)
 
+    # Download Button for Tab 3
+    out_vis = io.BytesIO()
+    with pd.ExcelWriter(out_vis, engine="openpyxl") as writer_vis:
+      df_chart_g.to_excel(
+          writer_vis, sheet_name="Keterpenuhan_Guru", index=False
+      )
+      df_kelas_jam.to_excel(
+          writer_vis, sheet_name="Keterisian_Kelas", index=False
+      )
+    out_vis.seek(0)
+
+    st.download_button(
+        label="📥 Download Excel Data Visualisasi Grafik Keterisian (.xlsx)",
+        data=out_vis,
+        file_name="Data_Visualisasi_Keterisian_SMPN2Plered.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="dl_tab3",
+    )
+
+  # ------------------------------------------------------------------
+  # TAB 4: MASTER DATA & EXPORT EXCEL PAKET LENGKAP
+  # ------------------------------------------------------------------
   with res_tab4:
-    st.subheader("📋 Master Data Penugasan & Download Excel")
+    st.subheader("📋 Master Data Penugasan & Download Paket Excel Lengkap")
     st.dataframe(df_master, use_container_width=True)
 
     output = io.BytesIO()
@@ -1101,4 +1202,5 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
         file_name="Jadwal_Guru_SMPN2Plered_Hasil.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
+        key="dl_tab4",
     )
